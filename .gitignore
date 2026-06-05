@@ -1,0 +1,15 @@
+# Local dev
+node_modules/
+dist/
+
+# Temp test files
+wstest.php
+wstest2.php
+wstest3.php
+wstest3.log
+
+# Private / excluded content
+GitExclude/
+
+# OS
+.DS_Store
