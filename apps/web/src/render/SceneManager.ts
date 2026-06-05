@@ -230,6 +230,15 @@ export class SceneManager {
       const mat: THREE.Material | THREE.Material[] =
         cfg.materialFaceValues.length > 0
           ? cfg.materialFaceValues.map((val, fi) => {
+              if (val < 0) {
+                // Sentinel: plain color, no number (used for e.g. coin rim).
+                return new THREE.MeshStandardMaterial({
+                  color: cfg.color,
+                  roughness: 0.35,
+                  metalness: 0.25,
+                  envMapIntensity: 0.8,
+                });
+              }
               const cornerData = cfg.faceCornerData?.[fi];
               return new THREE.MeshStandardMaterial({
                 map: cornerData

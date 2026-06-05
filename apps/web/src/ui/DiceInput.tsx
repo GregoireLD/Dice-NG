@@ -1,5 +1,5 @@
 import { useState, FormEvent, KeyboardEvent } from 'react';
-import { VALID_SIDES, DIE_LABELS } from '../dice/types';
+import { BUTTON_SIDES, DIE_LABELS } from '../dice/types';
 
 interface DiceInputProps {
   onRoll: (notation: string) => void;
@@ -40,7 +40,7 @@ export function DiceInput({ onRoll, disabled }: DiceInputProps) {
   return (
     <div className="dice-input-panel">
       <div className="die-buttons">
-        {VALID_SIDES.map((s) => (
+        {BUTTON_SIDES.map((s) => (
           <button
             key={s}
             className="die-btn"

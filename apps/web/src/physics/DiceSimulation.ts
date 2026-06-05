@@ -229,6 +229,48 @@ function topFeatureVerts(faceDir: THREE.Vector3, verts: THREE.Vector3[]): THREE.
 function buildDieConfig(sides: DieSides): DieConfig {
   const color = DIE_COLORS[sides];
 
+  if (sides === 1) {
+    // Sphere: always returns 1, no face detection needed (argmax over single direction always wins).
+    const geo = new THREE.SphereGeometry(0.55, 16, 12);
+    const faceDirections = [new THREE.Vector3(0, 1, 0)];
+    const faceValues = [1];
+    const pos = geo.getAttribute('position').array as Float32Array;
+    return { geo, faceDirections, faceValues, materialFaceValues: [], hullPoints: pos, color };
+  }
+
+  if (sides === 2) {
+    // Coin: cylinder with top=1, bottom=0. Rim gets -1 (plain color, no texture).
+    // CylinderGeometry groups: 0=lateral surface, 1=top cap, 2=bottom cap.
+    const geo = new THREE.CylinderGeometry(0.55, 0.55, 0.25, 40);
+    const faceDirections = [new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0)];
+    const faceValues = [1, 0];
+    const pos = geo.getAttribute('position').array as Float32Array;
+    return { geo, faceDirections, faceValues, materialFaceValues: [-1, 1, 0], hullPoints: pos, color };
+  }
+
+  if (sides === 3) {
+    // D6 cube with opposite faces sharing the same value (1/1, 2/2, 3/3).
+    const geo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+    const faceDirections = [
+      new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
+      new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1),
+    ];
+    const faceValues = [1, 1, 2, 2, 3, 3];
+    const pos = geo.getAttribute('position').array as Float32Array;
+    // BoxGeometry groups are ordered: +X, -X, +Y, -Y, +Z, -Z
+    const boxGroupDirs = [
+      new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
+      new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1),
+    ];
+    const materialFaceValues = boxGroupDirs.map((gd) => {
+      const fi = faceDirections.findIndex((fd) => fd.dot(gd) > 0.99);
+      return fi >= 0 ? faceValues[fi] : 0;
+    });
+    return { geo, faceDirections, faceValues, materialFaceValues, hullPoints: pos, color };
+  }
+
   if (sides === 100) {
     // Zocchihedron: sphere mesh + 100 Fibonacci-distributed face directions.
     // No per-face geometry groups — rendered as a plain colored sphere.
@@ -488,7 +530,11 @@ export class DiceSimulation {
       );
 
       let collider: RAPIER.ColliderDesc;
-      if (s === 6) {
+      if (s === 1) {
+        collider = RAPIER.ColliderDesc.ball(0.55);
+      } else if (s === 2) {
+        collider = RAPIER.ColliderDesc.cylinder(0.125, 0.55);
+      } else if (s === 3 || s === 6) {
         collider = RAPIER.ColliderDesc.cuboid(0.4, 0.4, 0.4);
       } else if (s === 100) {
         collider = RAPIER.ColliderDesc.ball(0.72);
