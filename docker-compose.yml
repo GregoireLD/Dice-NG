@@ -4,7 +4,9 @@ services:
       context: apps/signal
       dockerfile: Dockerfile
     ports:
-      - "3001:3001"
+      # Bind to loopback only — Synology reverse proxy reaches it at localhost:3001
+      # but it is not directly reachable from outside the NAS
+      - "127.0.0.1:3001:3001"
     environment:
       PORT: "3001"
     restart: unless-stopped
@@ -13,14 +15,3 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-  web:
-    build:
-      context: apps/web
-      dockerfile: Dockerfile
-    ports:
-      - "8080:80"
-    depends_on:
-      signal:
-        condition: service_healthy
-    restart: unless-stopped
