@@ -18,8 +18,27 @@ function uniqueFaceDirections(geo: THREE.BufferGeometry): THREE.Vector3[] {
     const a = new THREE.Vector3().fromBufferAttribute(pos, i);
     const b = new THREE.Vector3().fromBufferAttribute(pos, i + 1);
     const c = new THREE.Vector3().fromBufferAttribute(pos, i + 2);
-    const dir = a.clone().add(b).add(c).divideScalar(3).normalize();
-    if (!dirs.some((d) => d.dot(dir) > 0.99)) dirs.push(dir);
+    // Use face normal instead of centroid direction: co-planar triangles (same
+    // polygonal face) share the same normal, so they deduplicate correctly.
+    // Centroid direction fails for D10 kite faces (2 tris each) and D12
+    // pentagonal faces (3 tris each), producing 20/36 directions instead of 10/12.
+    const normal = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
+    // Flip inward-pointing normals (ensure outward via centroid dot-check)
+    if (normal.dot(a.clone().add(b).add(c)) < 0) normal.negate();
+    if (!dirs.some((d) => d.dot(normal) > 0.99)) dirs.push(normal);
+  }
+  return dirs;
+}
+
+/** Generate n evenly-distributed directions on a sphere (Fibonacci lattice). */
+function fibonacciSphereDirections(n: number): THREE.Vector3[] {
+  const dirs: THREE.Vector3[] = [];
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < n; i++) {
+    const y = 1 - (2 * (i + 0.5)) / n;
+    const r = Math.sqrt(1 - y * y);
+    const phi = goldenAngle * i;
+    dirs.push(new THREE.Vector3(r * Math.cos(phi), y, r * Math.sin(phi)));
   }
   return dirs;
 }
@@ -84,6 +103,20 @@ interface DieConfig {
 function buildDieConfig(sides: DieSides): DieConfig {
   const color = DIE_COLORS[sides];
 
+  if (sides === 100) {
+    // Zocchihedron: sphere mesh + 100 Fibonacci-distributed face directions
+    const geo = new THREE.SphereGeometry(0.72, 16, 12);
+    const faceDirections = fibonacciSphereDirections(100);
+    faceDirections.sort((a, b) => {
+      const dy = b.y - a.y;
+      if (Math.abs(dy) > 0.01) return dy;
+      return Math.atan2(a.z, a.x) - Math.atan2(b.z, b.x);
+    });
+    const faceValues = faceDirections.map((_, i) => i + 1);
+    const pos = geo.getAttribute('position').array as Float32Array;
+    return { geo, faceDirections, faceValues, hullPoints: pos, color };
+  }
+
   if (sides === 6) {
     // Cube: hardcode canonical face directions so values match real die layout
     const geo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
@@ -107,7 +140,6 @@ function buildDieConfig(sides: DieSides): DieConfig {
     case 10:  geo = buildD10Geometry(); break;
     case 12:  geo = new THREE.DodecahedronGeometry(0.72); break;
     case 20:  geo = new THREE.IcosahedronGeometry(0.76); break;
-    case 100: geo = new THREE.IcosahedronGeometry(0.76); break; // two-die simulation; mesh reuses D20
     default:  geo = new THREE.SphereGeometry(0.5, 8, 8);
   }
 
@@ -241,6 +273,8 @@ export class DiceSimulation {
       let collider: RAPIER.ColliderDesc;
       if (s === 6) {
         collider = RAPIER.ColliderDesc.cuboid(0.4, 0.4, 0.4);
+      } else if (s === 100) {
+        collider = RAPIER.ColliderDesc.ball(0.72);
       } else {
         collider = RAPIER.ColliderDesc.convexHull(config.hullPoints) ?? RAPIER.ColliderDesc.ball(0.5);
       }
