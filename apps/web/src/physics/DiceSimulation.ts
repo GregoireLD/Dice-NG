@@ -263,11 +263,12 @@ export class DiceSimulation {
 
     for (const s of sides) {
       const config = getDieConfig(s);
+      const highOrder = s > 20;
       const body = this.world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
           .setTranslation(0, 5, 0)
           .setLinearDamping(0.2)
-          .setAngularDamping(0.4)
+          .setAngularDamping(highOrder ? 1.2 : 0.4)
       );
 
       let collider: RAPIER.ColliderDesc;
@@ -278,7 +279,7 @@ export class DiceSimulation {
       } else {
         collider = RAPIER.ColliderDesc.convexHull(config.hullPoints) ?? RAPIER.ColliderDesc.ball(0.5);
       }
-      collider.setRestitution(0.4).setFriction(0.6);
+      collider.setRestitution(highOrder ? 0.15 : 0.4).setFriction(highOrder ? 0.95 : 0.6);
       this.world.createCollider(collider, body);
 
       this.dice.push({ sides: s, body, config });
