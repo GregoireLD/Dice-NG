@@ -3,6 +3,63 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { DieTransform, getDieConfig } from '../physics/DiceSimulation';
 import { DieSides } from '../dice/types';
 
+/** Scale down font for face shapes that are smaller than their UV bounding box. */
+function faceFontScale(sides: DieSides): number {
+  if (sides === 4 || sides === 8 || sides === 20) return 0.55; // equilateral triangle
+  if (sides === 10) return 0.60; // kite
+  return 1.0; // square (D6) or pentagon (D12)
+}
+
+function createFaceTexture(value: number, dieColor: number, fontScale = 1.0): THREE.CanvasTexture {
+  const S = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = S;
+  canvas.height = S;
+  const ctx = canvas.getContext('2d')!;
+
+  // Face background: die color darkened for contrast
+  const r = (dieColor >> 16) & 0xff;
+  const g = (dieColor >> 8) & 0xff;
+  const b = dieColor & 0xff;
+  ctx.fillStyle = `rgb(${Math.round(r * 0.5)},${Math.round(g * 0.5)},${Math.round(b * 0.5)})`;
+  ctx.fillRect(0, 0, S, S);
+
+  const text = String(value);
+  const fontSize = Math.round((text.length === 1 ? S * 0.65 : S * 0.48) * fontScale);
+  ctx.font = `900 ${fontSize}px Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.7)';
+  ctx.shadowBlur = S * 0.06;
+  ctx.shadowOffsetX = S * 0.025;
+  ctx.shadowOffsetY = S * 0.025;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(text, S / 2, S / 2);
+
+  // Underline 6 and 9 to disambiguate them
+  if (value === 6 || value === 9) {
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.round(S * 0.04);
+    ctx.lineCap = 'round';
+    const lw = fontSize * 0.45;
+    const ly = S / 2 + fontSize * 0.38;
+    ctx.beginPath();
+    ctx.moveTo(S / 2 - lw / 2, ly);
+    ctx.lineTo(S / 2 + lw / 2, ly);
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  // Ensure correct color rendering with tone-mapping pipeline
+  if ('SRGBColorSpace' in THREE) {
+    (tex as { colorSpace: string }).colorSpace = (THREE as { SRGBColorSpace: string }).SRGBColorSpace;
+  }
+  return tex;
+}
+
 export class SceneManager {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -99,18 +156,36 @@ export class SceneManager {
     for (const m of this.dieMeshes) {
       this.scene.remove(m);
       m.geometry.dispose();
-      (m.material as THREE.Material).dispose();
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      for (const mat of mats) {
+        (mat as THREE.MeshStandardMaterial).map?.dispose();
+        mat.dispose();
+      }
     }
     this.dieMeshes = [];
 
     for (const s of sides) {
       const cfg = getDieConfig(s);
-      const mat = new THREE.MeshStandardMaterial({
-        color: cfg.color,
-        roughness: 0.35,
-        metalness: 0.25,
-        envMapIntensity: 0.8,
-      });
+
+      const fontScale = faceFontScale(s);
+      const mat: THREE.Material | THREE.Material[] =
+        cfg.materialFaceValues.length > 0
+          ? cfg.materialFaceValues.map(
+              (val) =>
+                new THREE.MeshStandardMaterial({
+                  map: createFaceTexture(val, cfg.color, fontScale),
+                  roughness: 0.4,
+                  metalness: 0.15,
+                  envMapIntensity: 0.8,
+                })
+            )
+          : new THREE.MeshStandardMaterial({
+              color: cfg.color,
+              roughness: 0.35,
+              metalness: 0.25,
+              envMapIntensity: 0.8,
+            });
+
       const mesh = new THREE.Mesh(cfg.geo, mat);
       mesh.castShadow = true;
       mesh.receiveShadow = false;

@@ -90,12 +90,88 @@ function buildD10Geometry(): THREE.BufferGeometry {
   return geo;
 }
 
+// ─── Face group / UV helpers ─────────────────────────────────────────────────
+
+/**
+ * Groups each face's triangles into geometry groups and assigns per-face planar
+ * UV coordinates so each face can have its own material (numbered texture).
+ * Mutates geo in place.
+ */
+function applyFaceGroupsAndUVs(
+  geo: THREE.BufferGeometry,
+  faceDirections: THREE.Vector3[]
+): void {
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  const numTris = pos.count / 3;
+
+  // Cluster each triangle to the nearest face direction
+  const faceTris: number[][] = faceDirections.map(() => []);
+  for (let i = 0; i < numTris; i++) {
+    const a = new THREE.Vector3().fromBufferAttribute(pos, i * 3);
+    const b = new THREE.Vector3().fromBufferAttribute(pos, i * 3 + 1);
+    const c = new THREE.Vector3().fromBufferAttribute(pos, i * 3 + 2);
+    const normal = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
+    if (normal.dot(a.clone().add(b).add(c)) < 0) normal.negate();
+    const fi = faceDirections.findIndex((d) => d.dot(normal) > 0.99);
+    if (fi >= 0) faceTris[fi].push(i);
+  }
+
+  const newPos: number[] = [];
+  const newUV: number[] = [];
+  let groupStart = 0;
+
+  for (let fi = 0; fi < faceDirections.length; fi++) {
+    const tris = faceTris[fi];
+    const n = faceDirections[fi].clone().normalize();
+
+    // Use the first triangle's first edge as the U-axis so UV winding is always
+    // CCW (consistent with the outward face normal) — avoids mirrored numbers.
+    const ti0 = tris[0];
+    const edgeA = new THREE.Vector3().fromBufferAttribute(pos, ti0 * 3);
+    const edgeB = new THREE.Vector3().fromBufferAttribute(pos, ti0 * 3 + 1);
+    const t = edgeB.clone().sub(edgeA).normalize();
+    const bt = new THREE.Vector3().crossVectors(n, t).normalize();
+
+    // Collect all vertices and project to the face's 2-D plane
+    const verts: THREE.Vector3[] = [];
+    for (const ti of tris) {
+      for (let vi = 0; vi < 3; vi++) {
+        verts.push(new THREE.Vector3().fromBufferAttribute(pos, ti * 3 + vi));
+      }
+    }
+    const us = verts.map((v) => v.dot(t));
+    const vs = verts.map((v) => v.dot(bt));
+
+    // Center UVs at the face centroid so the canvas center aligns with the face
+    // center, then scale by circumradius so the face fills [pad, 1-pad]².
+    const centU = us.reduce((a, b) => a + b, 0) / us.length;
+    const centV = vs.reduce((a, b) => a + b, 0) / vs.length;
+    const circumR = Math.max(...us.map((u, k) => Math.hypot(u - centU, vs[k] - centV)));
+    const pad = 0.1;
+    const scale = (0.5 - pad) / circumR;
+
+    for (let k = 0; k < verts.length; k++) {
+      newPos.push(verts[k].x, verts[k].y, verts[k].z);
+      newUV.push(0.5 + (us[k] - centU) * scale, 0.5 + (vs[k] - centV) * scale);
+    }
+
+    geo.addGroup(groupStart, tris.length * 3, fi);
+    groupStart += tris.length * 3;
+  }
+
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(newPos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(newUV, 2));
+  geo.computeVertexNormals();
+}
+
 // ─── Per-die type configuration ──────────────────────────────────────────────
 
 interface DieConfig {
   geo: THREE.BufferGeometry;
   faceDirections: THREE.Vector3[];
   faceValues: number[];
+  /** Face value for each material group index (matches geo.groups order). */
+  materialFaceValues: number[];
   hullPoints: Float32Array;
   color: number;
 }
@@ -104,7 +180,8 @@ function buildDieConfig(sides: DieSides): DieConfig {
   const color = DIE_COLORS[sides];
 
   if (sides === 100) {
-    // Zocchihedron: sphere mesh + 100 Fibonacci-distributed face directions
+    // Zocchihedron: sphere mesh + 100 Fibonacci-distributed face directions.
+    // No per-face geometry groups — rendered as a plain colored sphere.
     const geo = new THREE.SphereGeometry(0.72, 16, 12);
     const faceDirections = fibonacciSphereDirections(100);
     faceDirections.sort((a, b) => {
@@ -114,11 +191,11 @@ function buildDieConfig(sides: DieSides): DieConfig {
     });
     const faceValues = faceDirections.map((_, i) => i + 1);
     const pos = geo.getAttribute('position').array as Float32Array;
-    return { geo, faceDirections, faceValues, hullPoints: pos, color };
+    return { geo, faceDirections, faceValues, materialFaceValues: [], hullPoints: pos, color };
   }
 
   if (sides === 6) {
-    // Cube: hardcode canonical face directions so values match real die layout
+    // Cube: hardcode canonical face directions so values match real die layout.
     const geo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
     const faceDirections = [
       new THREE.Vector3(0, 1, 0),   // +Y
@@ -130,7 +207,17 @@ function buildDieConfig(sides: DieSides): DieConfig {
     ];
     const faceValues = [1, 6, 3, 4, 2, 5];
     const pos = geo.getAttribute('position').array as Float32Array;
-    return { geo, faceDirections, faceValues, hullPoints: pos, color };
+    // BoxGeometry groups are in order: +X, -X, +Y, -Y, +Z, -Z
+    const boxGroupDirs = [
+      new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
+      new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1),
+    ];
+    const materialFaceValues = boxGroupDirs.map((gd) => {
+      const fi = faceDirections.findIndex((fd) => fd.dot(gd) > 0.99);
+      return fi >= 0 ? faceValues[fi] : 0;
+    });
+    return { geo, faceDirections, faceValues, materialFaceValues, hullPoints: pos, color };
   }
 
   let geo: THREE.BufferGeometry;
@@ -153,9 +240,11 @@ function buildDieConfig(sides: DieSides): DieConfig {
   });
 
   const faceValues = faceDirections.map((_, i) => i + 1);
-  const pos = geo.getAttribute('position').array as Float32Array;
+  // Save original hull points before applyFaceGroupsAndUVs replaces the position attribute
+  const pos = new Float32Array(geo.getAttribute('position').array as Float32Array);
+  applyFaceGroupsAndUVs(geo, faceDirections);
 
-  return { geo, faceDirections, faceValues, hullPoints: pos, color };
+  return { geo, faceDirections, faceValues, materialFaceValues: [...faceValues], hullPoints: pos, color };
 }
 
 // Lazily built, shared across all instances of the same die type
