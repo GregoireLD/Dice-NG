@@ -61,6 +61,7 @@ export class RoomClient {
   private ws: WebSocket;
   private _wsReady = false;
   private _msgQueue: ClientMsg[] = [];
+  private _intentionalClose = false;
 
   private _myId = '';
   private _myName: string;
@@ -84,7 +85,9 @@ export class RoomClient {
       this.handleServerMsg(JSON.parse(ev.data as string) as ServerMsg);
     });
 
-    this.ws.addEventListener('close', () => this.cb.onDisconnected?.());
+    this.ws.addEventListener('close', () => {
+      if (!this._intentionalClose) this.cb.onDisconnected?.();
+    });
     this.ws.addEventListener('error', () => {
       // 'close' always follows 'error' in browsers; onDisconnected handles cleanup
     });
@@ -110,6 +113,7 @@ export class RoomClient {
   }
 
   disconnect() {
+    this._intentionalClose = true;
     this.wsSend({ type: 'LEAVE' });
     this.ws.close();
   }

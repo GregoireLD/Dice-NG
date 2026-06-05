@@ -170,11 +170,27 @@ const httpServer = createServer((req: IncomingMessage, res) => {
 
 const wss = new WebSocketServer({ server: httpServer });
 
+const PING_INTERVAL = 30_000;
+
+setInterval(() => {
+  for (const [id, ws] of sockets) {
+    if ((ws as any)._alive === false) {
+      console.log(`Client ${id} missed heartbeat, terminating`);
+      ws.terminate();
+    } else {
+      (ws as any)._alive = false;
+      ws.ping();
+    }
+  }
+}, PING_INTERVAL);
+
 wss.on('connection', (ws) => {
   const id = genId();
+  (ws as any)._alive = true;
   sockets.set(id, ws);
   send(ws, { type: 'WELCOME', id });
 
+  ws.on('pong', () => { (ws as any)._alive = true; });
   ws.on('message', (raw) => handle(id, ws, raw.toString()));
   ws.on('close', () => onDisconnect(id));
   ws.on('error', () => onDisconnect(id));
