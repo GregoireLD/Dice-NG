@@ -166,6 +166,12 @@ function applyFaceGroupsAndUVs(
 
 // ─── Per-die type configuration ──────────────────────────────────────────────
 
+export interface FaceCornerData {
+  values: [number, number, number];
+  /** UV coords [u,v] for each of the 3 corners, in the same vertex order as the triangle. */
+  uvs: [[number, number], [number, number], [number, number]];
+}
+
 interface DieConfig {
   geo: THREE.BufferGeometry;
   faceDirections: THREE.Vector3[];
@@ -174,6 +180,50 @@ interface DieConfig {
   materialFaceValues: number[];
   hullPoints: Float32Array;
   color: number;
+  /** Set for vertex-up dice (D4): per-face corner values and UV positions. */
+  faceCornerData?: FaceCornerData[];
+}
+
+/**
+ * Returns the unique vertices of a BufferGeometry (handles repeated positions).
+ * Uses exact floating-point comparison scaled to the geometry — no fixed threshold.
+ */
+function uniqueVertices(geo: THREE.BufferGeometry): THREE.Vector3[] {
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  const verts: THREE.Vector3[] = [];
+  for (let i = 0; i < pos.count; i++) {
+    const v = new THREE.Vector3().fromBufferAttribute(pos, i);
+    if (!verts.some((u) => u.distanceTo(v) < 1e-10 * (u.length() + 1))) verts.push(v);
+  }
+  return verts;
+}
+
+/**
+ * For a convex polyhedron face whose outward normal is `faceDir`, returns the
+ * vertices that form the "top feature" when that face rests on the table.
+ *
+ * DESIGN NOTE — why this is exact and general:
+ *   We project every vertex onto faceDir (a simple dot product) and collect those
+ *   at the strict minimum.  No angle threshold, no raycasting.  The minimum is
+ *   always well-defined because we have a finite list of vertices.
+ *
+ *   The count of minimum-projection vertices tells us the topological feature type:
+ *     1 vertex  → vertex-top  (D4 tetrahedron — self-dual: each face is opposite
+ *                               exactly one vertex)
+ *     2 vertices → edge-top   (unusual for standard dice)
+ *     3+ vertices → face-top  (D6, D8, D12, D20 — opposite face has ≥3 vertices)
+ *
+ *   This is the support function of the polar dual evaluated at -faceDir.
+ *   Euler's V − E + F = 2 guarantees the topology is internally consistent, but
+ *   the projection method is what identifies which feature sits at the top.
+ */
+function topFeatureVerts(faceDir: THREE.Vector3, verts: THREE.Vector3[]): THREE.Vector3[] {
+  const projs = verts.map((v) => v.dot(faceDir));
+  const minProj = Math.min(...projs);
+  // Tolerance is relative to the spread across the whole polyhedron — no magic constant.
+  const spread = Math.max(...projs) - minProj;
+  const eps = spread * 1e-9 + 1e-14;
+  return verts.filter((_, i) => projs[i] <= minProj + eps);
 }
 
 function buildDieConfig(sides: DieSides): DieConfig {
@@ -230,6 +280,8 @@ function buildDieConfig(sides: DieSides): DieConfig {
     default:  geo = new THREE.SphereGeometry(0.5, 8, 8);
   }
 
+  const origPos = geo.getAttribute('position') as THREE.BufferAttribute;
+  const allVerts = uniqueVertices(geo);
   const faceDirections = uniqueFaceDirections(geo);
 
   // Sort directions by descending Y then azimuth for a deterministic value order
@@ -240,11 +292,86 @@ function buildDieConfig(sides: DieSides): DieConfig {
   });
 
   const faceValues = faceDirections.map((_, i) => i + 1);
-  // Save original hull points before applyFaceGroupsAndUVs replaces the position attribute
-  const pos = new Float32Array(geo.getAttribute('position').array as Float32Array);
+
+  // Classify the die's top-feature type by checking one face.
+  // For regular polyhedra every face yields the same count, so one sample suffices.
+  // topFeatureVerts returns the vertices at the minimum projection onto faceDir —
+  // no threshold, purely exact arithmetic on a finite set (see topFeatureVerts).
+  //   1 vertex  → vertex-top (e.g. D4 tetrahedron)
+  //   2 vertices → edge-top  (uncommon)
+  //   3+ vertices → face-top (D8, D10, D12, D20, …)
+  const topCount = topFeatureVerts(faceDirections[0], allVerts).length;
+  const isVertexTop = topCount === 1;
+
+  // Save hull points before applyFaceGroupsAndUVs replaces the position attribute
+  const hullPoints = new Float32Array(origPos.array as Float32Array);
+
+  // ── Vertex-top path ────────────────────────────────────────────────────────
+  // WHY BOTTOM FACE, NOT TOP:
+  //   For face-top dice one face points cleanly upward after settling, so
+  //   argmax is unambiguous.  For vertex-top dice NO face points upward — the
+  //   side faces all lean at the same dihedral angle (e.g. ~70.5° for D4), so
+  //   argmax picks whichever side happens to face the camera.  argmin is the
+  //   reliable choice: exactly one face is flat on the table (normal pointing
+  //   straight down), and its faceValue is pre-assigned to match the top vertex.
+  //
+  //   faceCornerData being non-null is the runtime sentinel that tells readFaceUp
+  //   and the renderer to use vertex-top logic.  Adding any vertex-top shape to
+  //   the switch above is therefore sufficient — no other code needs touching.
+  let faceCornerData: FaceCornerData[] | undefined;
+
+  if (isVertexTop) {
+    // Map each top vertex to the value of the face it sits opposite to.
+    const vertexValues = new Map<THREE.Vector3, number>();
+    for (let fi = 0; fi < faceDirections.length; fi++) {
+      const top = topFeatureVerts(faceDirections[fi], allVerts);
+      if (top.length === 1) vertexValues.set(top[0], faceValues[fi]);
+    }
+
+    // For each face: find its first triangle, look up corner vertex values,
+    // and compute UV positions mirroring applyFaceGroupsAndUVs exactly.
+    // (Assumes vertex-top faces are triangles, which holds for all standard dice.)
+    faceCornerData = faceDirections.map((fd) => {
+      let triStart = -1;
+      for (let i = 0; i < origPos.count; i += 3) {
+        const a = new THREE.Vector3().fromBufferAttribute(origPos, i);
+        const b = new THREE.Vector3().fromBufferAttribute(origPos, i + 1);
+        const c = new THREE.Vector3().fromBufferAttribute(origPos, i + 2);
+        const n = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
+        if (n.dot(a.clone().add(b).add(c)) < 0) n.negate();
+        // Both normals are unit vectors derived from the same geometry, so
+        // floating-point distance is well below 1e-6 for a true match.
+        if (n.distanceTo(fd) < 1e-6) { triStart = i; break; }
+      }
+
+      const corners = [0, 1, 2].map((vi) =>
+        new THREE.Vector3().fromBufferAttribute(origPos, triStart + vi)
+      );
+      const cornerValues = corners.map((c) => {
+        const match = allVerts.find((u) => u.distanceTo(c) < 1e-10 * (c.length() + 1));
+        return match ? (vertexValues.get(match) ?? 0) : 0;
+      }) as [number, number, number];
+
+      const t = corners[1].clone().sub(corners[0]).normalize();
+      const bt = new THREE.Vector3().crossVectors(fd, t).normalize();
+      const us = corners.map((v) => v.dot(t));
+      const vs = corners.map((v) => v.dot(bt));
+      const centU = (us[0] + us[1] + us[2]) / 3;
+      const centV = (vs[0] + vs[1] + vs[2]) / 3;
+      const circumR = Math.max(...corners.map((_, k) => Math.hypot(us[k] - centU, vs[k] - centV)));
+      const scale = (0.5 - 0.1) / circumR;
+      const uvs = [0, 1, 2].map((k) => [
+        0.5 + (us[k] - centU) * scale,
+        0.5 + (vs[k] - centV) * scale,
+      ]) as [[number, number], [number, number], [number, number]];
+
+      return { values: cornerValues, uvs };
+    });
+  }
+
   applyFaceGroupsAndUVs(geo, faceDirections);
 
-  return { geo, faceDirections, faceValues, materialFaceValues: [...faceValues], hullPoints: pos, color };
+  return { geo, faceDirections, faceValues, materialFaceValues: [...faceValues], hullPoints, color, faceCornerData };
 }
 
 // Lazily built, shared across all instances of the same die type
@@ -485,14 +612,35 @@ export class DiceSimulation {
     const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
     const up = new THREE.Vector3(0, 1, 0);
 
+    if (d.config.faceCornerData) {
+      // Vertex-top die (D4): use argmin — find the face whose outward normal points
+      // most downward, i.e. the face resting on the table.
+      //
+      // WHY NOT argmax: a settled D4 has no face pointing upward.  The three visible
+      // side faces all lean outward at the same ~70.5° dihedral angle, so their
+      // normals have comparable upward Y components.  argmax picks whichever happens
+      // to face the camera — it varies with roll orientation and does not identify the
+      // result vertex.  The bottom face IS uniquely defined: exactly one face is flat
+      // on the table, giving it the most downward-pointing normal.
+      //
+      // faceValues[bottom] was set during buildD4Config to equal the value of the
+      // vertex opposite that face (= the top vertex), so no further lookup is needed.
+      let worst = Infinity;
+      let worstIdx = 0;
+      for (let i = 0; i < d.config.faceDirections.length; i++) {
+        const dot = d.config.faceDirections[i].clone().applyQuaternion(q).dot(up);
+        if (dot < worst) { worst = dot; worstIdx = i; }
+      }
+      return d.config.faceValues[worstIdx];
+    }
+
+    // Face-top dice (D6, D8, D12, D20): result is the face whose outward normal
+    // points most upward — that face is visible from above and carries the number.
     let best = -Infinity;
     let bestIdx = 0;
     for (let i = 0; i < d.config.faceDirections.length; i++) {
       const dot = d.config.faceDirections[i].clone().applyQuaternion(q).dot(up);
-      if (dot > best) {
-        best = dot;
-        bestIdx = i;
-      }
+      if (dot > best) { best = dot; bestIdx = i; }
     }
     return d.config.faceValues[bestIdx];
   }
