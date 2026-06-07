@@ -275,15 +275,153 @@ body {
 .preset-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ── Side panel (history) ─────────────────────────────────────────────────── */
-.side-panel {
+/* ── Side panel – dimensions ─────────────────────────────────────────────────── */
+:root {
+  --toggle-pill-w: 26px;
+  --mobile-handle-h: 36px;
+  --mobile-drawer-h: 45vh;
+}
+
+/* ── Desktop: collapsible right-edge panel ───────────────────────────────────── */
+.side-panel-wrapper {
   position: absolute;
-  right: 16px;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
+  display: flex;
+  flex-direction: row-reverse; /* visual: [panel … toggle-pill] */
+  align-items: center;
+  pointer-events: none; /* transparent to canvas clicks in empty space */
+}
+
+.side-panel-toggle {
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: var(--toggle-pill-w);
+  background: rgba(15,15,26,0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: var(--radius) 0 0 var(--radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 10px 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.side-panel-toggle:hover { color: var(--text); background: rgba(20,20,36,0.95); }
+
+.side-panel-toggle-icon { font-size: 1rem; line-height: 1; }
+
+.side-panel-toggle-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  writing-mode: vertical-lr;
+  transform: rotate(180deg);
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+/* Panel slides in/out — transform instead of width so text never reflows */
+.side-panel {
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
   width: 240px;
   max-height: 60vh;
   display: flex;
   flex-direction: column;
+  transform: translateX(0);
+  opacity: 1;
+  transition: transform 0.32s ease, opacity 0.25s ease;
+}
+
+.side-panel-wrapper:not(.open) .side-panel {
+  transform: translateX(calc(100% + var(--toggle-pill-w)));
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Mobile: bottom drawer ───────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .side-panel-wrapper {
+    position: fixed;
+    inset: auto 0 0 0;
+    top: auto;
+    transform: none;
+    /*
+     * column-reverse: DOM order is [handle, panel] but flex reverses it so
+     * the handle renders LAST = at the very bottom of the container, and
+     * the panel renders ABOVE the handle. Without this, the panel's layout
+     * height pushes the handle far up the screen even when the panel is hidden.
+     */
+    flex-direction: column-reverse;
+    align-items: stretch;
+    pointer-events: none;
+    z-index: 10; /* must paint above bottom-bar (later in DOM = higher default stack) */
+  }
+
+  .side-panel-toggle {
+    pointer-events: auto;
+    width: auto;
+    flex-direction: row;
+    justify-content: center;
+    height: var(--mobile-handle-h);
+    border-radius: var(--radius) var(--radius) 0 0;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    padding: 0 16px;
+    gap: 8px;
+  }
+
+  .side-panel-toggle-icon {
+    display: inline-block;
+    transform: rotate(-90deg); /* ‹ → ∧ and › → ∨ */
+  }
+
+  .side-panel-toggle-label {
+    writing-mode: horizontal-tb;
+    transform: none;
+    font-size: 0.7rem;
+  }
+
+  /*
+   * Fixed height (not max-height) so the shift applied to bottom-bar always
+   * matches the actual drawer height — max-height would make the panel shorter
+   * than 45vh when history is short, causing the bottom-bar to over-shift.
+   */
+  .side-panel {
+    pointer-events: auto;
+    width: 100%;
+    height: var(--mobile-drawer-h);
+    max-height: none;
+    overflow-y: auto;
+    transform: translateY(0); /* open: panel visible just above the handle */
+  }
+
+  .side-panel-wrapper:not(.open) .side-panel {
+    transform: translateY(100%); /* closed: slide down behind / below handle */
+    pointer-events: none;
+  }
+
+  /* Push the dice input bar up by exactly handle-height (closed) or full drawer (open) */
+  .side-panel-wrapper ~ .bottom-bar {
+    transition: transform 0.32s ease;
+    transform: translateX(-50%) translateY(calc(-1 * var(--mobile-handle-h)));
+  }
+
+  .side-panel-wrapper.open ~ .bottom-bar {
+    transform: translateX(-50%) translateY(calc(-1 * (var(--mobile-drawer-h) + var(--mobile-handle-h))));
+  }
 }
 
 .history-panel {

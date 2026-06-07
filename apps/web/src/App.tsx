@@ -52,6 +52,13 @@ export default function App() {
   const [isHost, setIsHost] = useState(false);
   const [roomCode, setRoomCode] = useState('');
   const [showStatsModal, setShowStatsModal] = useState(false);
+  const [sidePanelOpen, setSidePanelOpen] = useState(() => window.innerWidth > 600);
+
+  useEffect(() => {
+    const onResize = () => setSidePanelOpen(window.innerWidth > 600);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const currentNotationRef = useRef('');
   const currentModifierRef = useRef(0);
@@ -390,6 +397,42 @@ export default function App() {
             </div>
           )}
 
+          <div className={`side-panel-wrapper${sidePanelOpen ? ' open' : ''}`}>
+            <button
+              className="side-panel-toggle"
+              onClick={() => setSidePanelOpen(o => !o)}
+              aria-label={sidePanelOpen ? 'Collapse panel' : 'Expand panel'}
+            >
+              <span className="side-panel-toggle-icon">{sidePanelOpen ? '›' : '‹'}</span>
+              <span className="side-panel-toggle-label">Roll History</span>
+            </button>
+            <div className="side-panel">
+              {roomCode && roomCode !== 'SOLO' && (
+                <PlayerList
+                  players={players}
+                  myId={myId}
+                  roomCode={roomCode}
+                  isHost={isHost}
+                  onLeave={handleLeaveRoom}
+                />
+              )}
+              {(!roomCode || roomCode === 'SOLO') && (
+                <div className="solo-back">
+                  <button className="leave-btn" onClick={handleLeaveRoom}>← Lobby</button>
+                  <button
+                    className="stats-test-btn"
+                    onClick={() => setShowStatsModal(true)}
+                    disabled={isRolling}
+                    title="Run statistical fairness test on all die geometries"
+                  >
+                    Stats Test
+                  </button>
+                </div>
+              )}
+              <RollHistory records={history} onClear={() => setHistory([])} />
+            </div>
+          </div>
+
           <div className="bottom-bar">
             <DiceInput onRoll={handleRoll} disabled={isRolling} />
             <div className="bottom-status-row">
@@ -401,32 +444,6 @@ export default function App() {
                 </button>
               )}
             </div>
-          </div>
-
-          <div className="side-panel">
-            {roomCode && roomCode !== 'SOLO' && (
-              <PlayerList
-                players={players}
-                myId={myId}
-                roomCode={roomCode}
-                isHost={isHost}
-                onLeave={handleLeaveRoom}
-              />
-            )}
-            {(!roomCode || roomCode === 'SOLO') && (
-              <div className="solo-back">
-                <button className="leave-btn" onClick={handleLeaveRoom}>← Lobby</button>
-                <button
-                  className="stats-test-btn"
-                  onClick={() => setShowStatsModal(true)}
-                  disabled={isRolling}
-                  title="Run statistical fairness test on all die geometries"
-                >
-                  Stats Test
-                </button>
-              </div>
-            )}
-            <RollHistory records={history} onClear={() => setHistory([])} />
           </div>
         </>
       )}
