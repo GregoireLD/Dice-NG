@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { DiceSimulation, DieTransform } from './physics/DiceSimulation';
 import { SceneManager } from './render/SceneManager';
 import { parseNotation, expandDice } from './dice/notation';
-import { RollRecord, DieResult } from './dice/types';
+import { RollRecord, DieResult, DieSides } from './dice/types';
 import { RoomClient, RoomPlayer } from './rooms/RoomClient';
 import { DiceInput } from './ui/DiceInput';
 import { RollHistory } from './ui/RollHistory';
 import { Lobby } from './ui/Lobby';
 import { PlayerList } from './ui/PlayerList';
+import { DiceStatsModal } from './ui/DiceStatsModal';
 import './App.css';
 
 type AppState = 'loading' | 'idle' | 'rolling' | 'settled';
@@ -50,6 +51,7 @@ export default function App() {
   const [myId, setMyId] = useState('');
   const [isHost, setIsHost] = useState(false);
   const [roomCode, setRoomCode] = useState('');
+  const [showStatsModal, setShowStatsModal] = useState(false);
 
   const currentNotationRef = useRef('');
   const currentModifierRef = useRef(0);
@@ -299,10 +301,18 @@ export default function App() {
   }, []);
 
   function finalizeRoll(transforms: DieTransform[]) {
-    const diceResults: DieResult[] = transforms.map((t) => ({
-      sides: t.sides,
-      value: t.value ?? 0,
-    }));
+    const raw: DieResult[] = transforms.map((t) => ({ sides: t.sides, value: t.value ?? 0 }));
+
+    // Collapse percentile pairs (1000=tens 00-90, 1001=units 1-10) into single d100 results.
+    // expandDice groups all tens before all units, so pair by index.
+    const tensValues = raw.filter((d) => d.sides === 1000).map((d) => d.value);
+    const unitsValues = raw.filter((d) => d.sides === 1001).map((d) => d.value);
+    const others = raw.filter((d) => d.sides !== 1000 && d.sides !== 1001);
+    const diceResults: DieResult[] = [
+      ...tensValues.map((tv, i) => ({ sides: 100 as DieSides, value: tv + (unitsValues[i] ?? 0) })),
+      ...others,
+    ];
+
     const rawSum = diceResults.reduce((s, d) => s + d.value, 0);
     const total = rawSum + currentModifierRef.current;
 
@@ -359,6 +369,8 @@ export default function App() {
         </div>
       )}
 
+      {showStatsModal && <DiceStatsModal onClose={() => setShowStatsModal(false)} />}
+
       {appState !== 'loading' && (
         <>
           {(latestRecord || isRolling) && (
@@ -367,7 +379,7 @@ export default function App() {
               <span className="result-total">{isRolling ? '…' : latestRecord?.total}</span>
               {latestRecord && latestRecord.dice.length > 1 && !isRolling && (
                 <span className="result-breakdown">
-                  [{latestRecord.dice.map((d) => d.value).join(', ')}]
+                  [{latestRecord.dice.map((d) => String(d.value)).join(', ')}]
                   {latestRecord.modifier !== 0 &&
                     ` ${latestRecord.modifier > 0 ? '+' : ''}${latestRecord.modifier}`}
                 </span>
@@ -404,6 +416,14 @@ export default function App() {
             {(!roomCode || roomCode === 'SOLO') && (
               <div className="solo-back">
                 <button className="leave-btn" onClick={handleLeaveRoom}>← Lobby</button>
+                <button
+                  className="stats-test-btn"
+                  onClick={() => setShowStatsModal(true)}
+                  disabled={isRolling}
+                  title="Run statistical fairness test on all die geometries"
+                >
+                  Stats Test
+                </button>
               </div>
             )}
             <RollHistory records={history} onClear={() => setHistory([])} />

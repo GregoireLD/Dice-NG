@@ -241,7 +241,9 @@ function buildDieConfig(sides: DieSides): DieConfig {
   if (sides === 2) {
     // Coin: cylinder with top=1, bottom=0. Rim gets -1 (plain color, no texture).
     // CylinderGeometry groups: 0=lateral surface, 1=top cap, 2=bottom cap.
-    const geo = new THREE.CylinderGeometry(0.55, 0.55, 0.25, 40);
+    // Height 0.08 gives a realistic coin aspect ratio (h/d ≈ 0.07) that is
+    // highly unstable on edge, so it almost always topples to a flat face.
+    const geo = new THREE.CylinderGeometry(0.55, 0.55, 0.08, 40);
     const faceDirections = [new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0)];
     const faceValues = [1, 0];
     const pos = geo.getAttribute('position').array as Float32Array;
@@ -284,6 +286,38 @@ function buildDieConfig(sides: DieSides): DieConfig {
     const faceValues = faceDirections.map((_, i) => i + 1);
     const pos = geo.getAttribute('position').array as Float32Array;
     return { geo, faceDirections, faceValues, materialFaceValues: [], hullPoints: pos, color };
+  }
+
+  if (sides === 1000) {
+    // Tens percentile die: D10 geometry with face values 0, 10, 20, …, 90.
+    const geo = buildD10Geometry();
+    const origPos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const faceDirections = uniqueFaceDirections(geo);
+    faceDirections.sort((a, b) => {
+      const dy = b.y - a.y;
+      if (Math.abs(dy) > 0.01) return dy;
+      return Math.atan2(a.z, a.x) - Math.atan2(b.z, b.x);
+    });
+    const faceValues = faceDirections.map((_, i) => i * 10); // 0, 10, 20, …, 90
+    const hullPoints = new Float32Array(origPos.array as Float32Array);
+    applyFaceGroupsAndUVs(geo, faceDirections);
+    return { geo, faceDirections, faceValues, materialFaceValues: [...faceValues], hullPoints, color };
+  }
+
+  if (sides === 1001) {
+    // Units percentile die: D10 geometry with face values 1-10.
+    const geo = buildD10Geometry();
+    const origPos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const faceDirections = uniqueFaceDirections(geo);
+    faceDirections.sort((a, b) => {
+      const dy = b.y - a.y;
+      if (Math.abs(dy) > 0.01) return dy;
+      return Math.atan2(a.z, a.x) - Math.atan2(b.z, b.x);
+    });
+    const faceValues = faceDirections.map((_, i) => i + 1); // 1-10
+    const hullPoints = new Float32Array(origPos.array as Float32Array);
+    applyFaceGroupsAndUVs(geo, faceDirections);
+    return { geo, faceDirections, faceValues, materialFaceValues: [...faceValues], hullPoints, color };
   }
 
   if (sides === 6) {
@@ -440,6 +474,11 @@ interface SimDie {
   sides: DieSides;
   body: RAPIER.RigidBody;
   config: DieConfig;
+  // For dice whose physics cannot be made provably fair (currently d2/coin),
+  // the uniformly-sampled faceIdx result is stored here and returned directly
+  // from readFaceUp(), bypassing the physics orientation readout.  The visual
+  // animation still runs; only the announced result is RNG-determined.
+  fixedResult?: number;
 }
 
 
@@ -448,6 +487,8 @@ const FIXED_STEP = 1 / 60;
 const SETTLE_DELAY = 0.5;   // seconds after roll before we check settle
 const MAX_ROLL_TIME = 9;    // hard timeout: force-stop after this many sim-seconds
 const PLAY_HALF = 4.5;      // half-size of playable area (dice spawn within ±PLAY_HALF)
+const DEATH_Y = -5;         // y below which a die is considered escaped
+const DEATH_XZ = 15;        // |x| or |z| beyond which a die is considered escaped
 
 export class DiceSimulation {
   private world: RAPIER.World;
@@ -521,7 +562,8 @@ export class DiceSimulation {
 
     for (const s of sides) {
       const config = getDieConfig(s);
-      const highOrder = s > 20;
+      // 1000/1001 = percentile dice (D10 geometry) — treat like a regular D10, not high-order
+      const highOrder = s > 20 && s !== 1000 && s !== 1001;
       const body = this.world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
           .setTranslation(0, 5, 0)
@@ -533,7 +575,7 @@ export class DiceSimulation {
       if (s === 1) {
         collider = RAPIER.ColliderDesc.ball(0.55);
       } else if (s === 2) {
-        collider = RAPIER.ColliderDesc.cylinder(0.125, 0.55);
+        collider = RAPIER.ColliderDesc.cylinder(0.04, 0.55);
       } else if (s === 3 || s === 6) {
         collider = RAPIER.ColliderDesc.cuboid(0.4, 0.4, 0.4);
       } else if (s === 100) {
@@ -558,6 +600,8 @@ export class DiceSimulation {
     // Spread capped so dice never start outside the play area
     const spread = Math.min(1.0 + this.dice.length * 0.25, 3.0);
 
+    const worldUp = new THREE.Vector3(0, 1, 0);
+
     for (const die of this.dice) {
       const x = (rng() - 0.5) * spread * 2;
       const z = (rng() - 0.5) * spread * 2;
@@ -565,7 +609,54 @@ export class DiceSimulation {
       // well below the wall top at y=8
       die.body.setTranslation({ x, y: 1.5 + rng() * 0.5, z }, true);
 
-      die.body.setRotation(randomUnitQuaternion(rng), true);
+      // Starting orientation — three layers, all driven by the shared seed so
+      // every client running the same seed sees identical physics:
+      //
+      // 1. FACE INDEX  (1 rng draw)
+      //    Sample which face starts pointing "up" (face-top) or "down" (vertex-top
+      //    D4) uniformly in [0, N).  Guarantees P(face i starts up) = 1/N exactly,
+      //    correcting the systematic bias a uniform SO(3) quaternion leaves behind
+      //    once the always-upward throw impulse is applied.
+      //
+      // 2. YAW  (1 rng draw)
+      //    Full 360° rotation around the world-up axis.  The chosen face stays up
+      //    but the die's horizontal orientation is randomised, averaging out any
+      //    directional bias introduced by the fixed-upward impulse direction.
+      //
+      // 3. TILT  (3 rng draws)
+      //    Small random tilt (≤ ~20°) around a random horizontal axis.  Breaks
+      //    the exactly-face-flat start so the throw sees a variety of initial
+      //    conditions each roll, reducing systematic landing bias further.
+      const numFaces = die.config.faceDirections.length;
+      const faceIdx = Math.floor(rng() * numFaces) % numFaces;
+      const faceDir = die.config.faceDirections[faceIdx];
+
+      // d2 (coin): flat-disk physics cannot be made provably fair — a thin coin
+      // spinning around its symmetry axis has no face-changing effect, so the yaw
+      // layer does nothing for it, and the residual physics bias is persistent.
+      // Lock the result to the uniformly-sampled face index; animation still plays.
+      die.fixedResult = die.sides === 2 ? die.config.faceValues[faceIdx] : undefined;
+
+      const alignDir = die.config.faceCornerData
+        ? new THREE.Vector3(-faceDir.x, -faceDir.y, -faceDir.z)
+        : faceDir.clone();
+      const faceQ = new THREE.Quaternion().setFromUnitVectors(alignDir.normalize(), worldUp);
+
+      const yawQ = new THREE.Quaternion().setFromAxisAngle(worldUp, rng() * Math.PI * 2);
+
+      const tiltAngle = rng() * 0.35; // up to ~20°
+      const tx = rng() - 0.5;
+      const tz = rng() - 0.5;
+      const tLen = Math.hypot(tx, tz);
+      const tiltQ = tLen > 1e-6
+        ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(tx / tLen, 0, tz / tLen), tiltAngle)
+        : new THREE.Quaternion();
+
+      // Apply right-to-left: face alignment first, then yaw around world-up,
+      // then tilt — all in world space so the face-up guarantee is preserved.
+      const finalQ = tiltQ.multiply(yawQ).multiply(faceQ);
+      die.body.setRotation({ x: finalQ.x, y: finalQ.y, z: finalQ.z, w: finalQ.w }, true);
+
       die.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       die.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       die.body.wakeUp();
@@ -598,6 +689,7 @@ export class DiceSimulation {
       this.world.step();
       this.simTime += FIXED_STEP;
       this.accumulator -= FIXED_STEP;
+      this.recoverEscapedDice();
     }
 
     // Hard timeout: if a die got stuck or escaped, force-stop everything
@@ -611,6 +703,24 @@ export class DiceSimulation {
         d.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
         d.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       }
+    }
+  }
+
+  // ─── Death plane ────────────────────────────────────────────────────────────
+
+  private recoverEscapedDice() {
+    const n = this.dice.length;
+    for (let i = 0; i < n; i++) {
+      const d = this.dice[i];
+      const pos = d.body.translation();
+      if (pos.y > DEATH_Y && Math.abs(pos.x) <= DEATH_XZ && Math.abs(pos.z) <= DEATH_XZ) continue;
+
+      // Spread recovered dice symmetrically along X so they don't stack
+      const rx = (i - (n - 1) / 2) * 0.9;
+      d.body.setTranslation({ x: rx, y: 3, z: 0 }, true);
+      d.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      d.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      d.body.wakeUp();
     }
   }
 
@@ -645,6 +755,31 @@ export class DiceSimulation {
     return this.dice.every((d) => d.body.isSleeping());
   }
 
+  /**
+   * Advance the simulation by exactly n fixed steps without rendering or
+   * the accumulator.  Intended for headless statistical testing only — call
+   * in tight async loops and yield to the event loop periodically so the UI
+   * stays responsive.
+   */
+  stepMany(n: number) {
+    for (let i = 0; i < n; i++) {
+      this.world.step();
+      this.simTime += FIXED_STEP;
+      this.recoverEscapedDice();
+    }
+    if (
+      this.rollTime >= 0 &&
+      !this.forceSettled &&
+      this.simTime - this.rollTime > MAX_ROLL_TIME
+    ) {
+      this.forceSettled = true;
+      for (const d of this.dice) {
+        d.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        d.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      }
+    }
+  }
+
   /** Kill switch: stop any ongoing roll and clear dice immediately. */
   forceReset() {
     for (const d of this.dice) this.world.removeRigidBody(d.body);
@@ -654,6 +789,8 @@ export class DiceSimulation {
   }
 
   private readFaceUp(d: SimDie): number {
+    if (d.fixedResult !== undefined) return d.fixedResult;
+
     const r = d.body.rotation();
     const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
     const up = new THREE.Vector3(0, 1, 0);
@@ -694,28 +831,6 @@ export class DiceSimulation {
   dispose() {
     this.world.free();
   }
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function randomUnitQuaternion(rng: () => number): {
-  x: number;
-  y: number;
-  z: number;
-  w: number;
-} {
-  // Shoemake's method for uniform random quaternion
-  const u1 = rng();
-  const u2 = rng() * Math.PI * 2;
-  const u3 = rng() * Math.PI * 2;
-  const s1 = Math.sqrt(1 - u1);
-  const s2 = Math.sqrt(u1);
-  return {
-    x: s1 * Math.sin(u2),
-    y: s1 * Math.cos(u2),
-    z: s2 * Math.sin(u3),
-    w: s2 * Math.cos(u3),
-  };
 }
 
 export { getDieConfig };

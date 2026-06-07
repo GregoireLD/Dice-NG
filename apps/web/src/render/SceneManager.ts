@@ -6,7 +6,7 @@ import { DieSides } from '../dice/types';
 /** Scale down font for face shapes that are smaller than their UV bounding box. */
 function faceFontScale(sides: DieSides): number {
   if (sides === 4 || sides === 8 || sides === 20) return 0.55; // equilateral triangle
-  if (sides === 10) return 0.60; // kite
+  if (sides === 10 || sides === 1000 || sides === 1001) return 0.60; // kite (percentile dice share d10 shape)
   return 1.0; // square (D6) or pentagon (D12)
 }
 
@@ -59,7 +59,16 @@ function createVertexTopFaceTexture(cornerData: FaceCornerData, dieColor: number
     const cy = (1 - v) * S;
     const px = S / 2 + (cx - S / 2) * 0.7;
     const py = S / 2 + (cy - S / 2) * 0.7;
-    ctx.fillText(String(cornerData.values[k]), px, py);
+    // Rotate each number so its bottom points toward the face center.
+    // In canvas space (Y-down), the text baseline (bottom) after rotation by α
+    // points in direction (-sinα, cosα). We want that to match the inward
+    // direction (S/2−px, S/2−py), giving α = atan2(px−S/2, S/2−py).
+    const angle = Math.atan2(px - S / 2, S / 2 - py);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(angle);
+    ctx.fillText(String(cornerData.values[k]), 0, 0);
+    ctx.restore();
   }
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -69,7 +78,7 @@ function createVertexTopFaceTexture(cornerData: FaceCornerData, dieColor: number
   return tex;
 }
 
-function createFaceTexture(value: number, dieColor: number, fontScale = 1.0): THREE.CanvasTexture {
+function createFaceTexture(text: string, dieColor: number, fontScale = 1.0): THREE.CanvasTexture {
   const S = 256;
   const canvas = document.createElement('canvas');
   canvas.width = S;
@@ -83,7 +92,6 @@ function createFaceTexture(value: number, dieColor: number, fontScale = 1.0): TH
   ctx.fillStyle = `rgb(${Math.round(r * 0.5)},${Math.round(g * 0.5)},${Math.round(b * 0.5)})`;
   ctx.fillRect(0, 0, S, S);
 
-  const text = String(value);
   const fontSize = Math.round((text.length === 1 ? S * 0.65 : S * 0.48) * fontScale);
   ctx.font = `900 ${fontSize}px Arial, sans-serif`;
   ctx.textAlign = 'center';
@@ -95,8 +103,8 @@ function createFaceTexture(value: number, dieColor: number, fontScale = 1.0): TH
   ctx.fillStyle = '#ffffff';
   ctx.fillText(text, S / 2, S / 2);
 
-  // Underline 6 and 9 to disambiguate them
-  if (value === 6 || value === 9) {
+  // Underline 6 and 9 to disambiguate them (two-digit numbers like 60/90 are already unambiguous)
+  if (text === '6' || text === '9') {
     ctx.shadowBlur = 0;
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
@@ -240,10 +248,12 @@ export class SceneManager {
                 });
               }
               const cornerData = cfg.faceCornerData?.[fi];
+              // Tens percentile die shows "00" for 0, "10"…"90" for the rest
+              const faceText = s === 1000 ? (val === 0 ? '00' : String(val)) : String(val);
               return new THREE.MeshStandardMaterial({
                 map: cornerData
                   ? createVertexTopFaceTexture(cornerData, cfg.color)
-                  : createFaceTexture(val, cfg.color, fontScale),
+                  : createFaceTexture(faceText, cfg.color, fontScale),
                 roughness: 0.4,
                 metalness: 0.15,
                 envMapIntensity: 0.8,

@@ -6,7 +6,8 @@ interface DiceInputProps {
   disabled: boolean;
 }
 
-const PRESETS = ['d20', '2d6', 'd20+5', '4d6', 'd12+d8', '2d10'];
+// d100z = 100-face Zocchihedron sphere (legacy fun mode)
+const PRESETS = ['d20', '2d6', 'd100', 'd20+5', '4d6', 'd100z'];
 
 export function DiceInput({ onRoll, disabled }: DiceInputProps) {
   const [value, setValue] = useState('2d6');
@@ -62,7 +63,7 @@ export function DiceInput({ onRoll, disabled }: DiceInputProps) {
             setError('');
           }}
           onKeyDown={handleKey}
-          placeholder="e.g. 2d6+3"
+          placeholder="e.g. 2d6+3  (d100z for 100-face ball)"
           disabled={disabled}
           spellCheck={false}
           autoComplete="off"

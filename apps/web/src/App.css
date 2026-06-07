@@ -616,6 +616,263 @@ body {
 
 .leave-btn:hover { color: #f87171; border-color: rgba(220,60,60,0.4); }
 
-.solo-back { display: flex; justify-content: flex-start; margin-bottom: -4px; }
+.solo-back { display: flex; align-items: center; gap: 8px; justify-content: flex-start; margin-bottom: -4px; }
+
+.stats-test-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.stats-test-btn:hover:not(:disabled) { color: var(--accent-bright); border-color: var(--accent-bright); }
+.stats-test-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Stats modal ─────────────────────────────────────────────────────────────── */
+.stats-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 16px;
+}
+
+.stats-modal {
+  background: #161625;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px;
+  width: min(660px, 96vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.stats-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stats-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent-bright);
+  letter-spacing: 0.03em;
+}
+
+.stats-close-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.stats-close-btn:hover { color: var(--text); }
+
+.stats-intro { display: flex; flex-direction: column; gap: 10px; }
+
+.stats-intro p {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.stats-intro-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.stats-run-btn {
+  align-self: flex-start;
+  padding: 8px 22px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.stats-run-btn:hover { background: var(--accent-bright); }
+
+.stats-progress-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(157, 125, 232, 0.07);
+  border: 1px solid rgba(157, 125, 232, 0.25);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.stats-progress-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+.stats-progress-die { font-size: 1rem; }
+.stats-progress-die strong { color: var(--text); }
+.stats-die-idx { color: var(--text-muted); font-size: 0.78rem; margin-left: 4px; }
+.stats-progress-counts { color: var(--text-muted); margin-left: auto; }
+.stats-eta { color: var(--accent-bright); font-size: 0.82rem; white-space: nowrap; }
+
+.stats-progress-track {
+  height: 12px;
+  background: rgba(157, 125, 232, 0.18);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.stats-progress-track-sm {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.stats-progress-fill {
+  height: 100%;
+  background: var(--accent-bright);
+  border-radius: 0;
+  transition: width 0.2s linear;
+  min-width: 0;
+}
+.stats-progress-fill-dim {
+  background: rgba(157, 125, 232, 0.5);
+}
+
+.stats-progress-pct {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: right;
+  margin-top: -4px;
+}
+
+.stats-die-progress-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.stats-cancel-btn {
+  align-self: flex-start;
+  padding: 5px 14px;
+  background: transparent;
+  border: 1px solid rgba(220,60,60,0.45);
+  border-radius: 6px;
+  color: rgba(220,100,100,0.85);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.stats-cancel-btn:hover { background: rgba(220,60,60,0.12); color: #f87171; }
+
+.stats-results { display: flex; flex-direction: column; gap: 10px; }
+
+.stat-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: slide-in 0.25s ease;
+}
+
+.stat-row.stat-marginal { border-color: rgba(251,191,36,0.25); }
+.stat-row.stat-suspect  { border-color: rgba(251,191,36,0.45); }
+.stat-row.stat-biased   { border-color: rgba(248,113,113,0.5); }
+
+.stat-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.stat-die {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 30px;
+}
+
+.stat-meta { font-size: 0.72rem; color: var(--text-muted); }
+
+.stat-chi {
+  font-size: 0.72rem;
+  font-family: 'Courier New', monospace;
+  color: var(--text-muted);
+}
+
+.stat-crit { color: rgba(255,255,255,0.3); }
+
+.stat-verdict {
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-left: auto;
+}
+
+.stat-verdict-fair     { color: #4ade80; }
+.stat-verdict-marginal { color: #86efac; }
+.stat-verdict-suspect  { color: #fbbf24; }
+.stat-verdict-biased   { color: #f87171; }
+
+.stat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.stat-chip {
+  font-size: 0.68rem;
+  font-family: 'Courier New', monospace;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.05);
+  cursor: default;
+  transition: background 0.1s;
+}
+
+.stat-chip:hover { background: rgba(255,255,255,0.1); }
+.chip-ok   { color: #4ade80; }
+.chip-warn { color: #fbbf24; }
+.chip-bad  { color: #f87171; background: rgba(239,68,68,0.12); }
+
+.stats-done {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.stats-note {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
 
 .result-roller { font-size: 0.72rem; color: var(--text-muted); margin-top: 1px; }

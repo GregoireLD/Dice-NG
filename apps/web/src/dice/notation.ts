@@ -1,5 +1,8 @@
 import { VALID_SIDES, DieSides, ParsedDie, ParsedNotation } from './types';
 
+// Sides users can type directly — excludes the internal tens-die (1000)
+const USER_VALID_SIDES = new Set<number>(VALID_SIDES.filter((s) => s !== 1000));
+
 export function parseNotation(input: string): ParsedNotation {
   const s = input.toLowerCase().replace(/\s+/g, '');
   if (!s) throw new Error('Empty notation');
@@ -15,18 +18,33 @@ export function parseNotation(input: string): ParsedNotation {
     const negative = term[0] === '-';
     const bare = term.replace(/^[+-]/, '');
 
-    const dieMatch = bare.match(/^(\d*)d(\d+)$/);
+    // Optional trailing 'z' suffix selects the Zocchihedron variant (e.g. d100z)
+    const dieMatch = bare.match(/^(\d*)d(\d+)(z?)$/);
     if (dieMatch) {
       if (negative) throw new Error('Negative dice count is not supported');
       const count = dieMatch[1] ? parseInt(dieMatch[1], 10) : 1;
-      const sides = parseInt(dieMatch[2], 10);
-      if (!VALID_SIDES.includes(sides as DieSides)) {
-        throw new Error(
-          `d${sides} is not supported. Valid: ${VALID_SIDES.map((s) => 'd' + s).join(', ')}`
-        );
-      }
+      const rawSides = parseInt(dieMatch[2], 10);
+      const zSuffix = dieMatch[3] === 'z';
+
       if (count < 1 || count > 100) throw new Error('Dice count must be 1–100');
-      dice.push({ count, sides: sides as DieSides });
+
+      if (rawSides === 100 && !zSuffix) {
+        // d100 → percentile pair: tens die (00-90) + units die (1-10)
+        // Both use dedicated internal types so they can be collapsed into one result later.
+        dice.push({ count, sides: 1000 });
+        dice.push({ count, sides: 1001 });
+      } else if (rawSides === 100 && zSuffix) {
+        // d100z → 100-face Zocchihedron sphere
+        dice.push({ count, sides: 100 });
+      } else if (zSuffix) {
+        throw new Error(`d${rawSides}z is not supported`);
+      } else if (!USER_VALID_SIDES.has(rawSides)) {
+        throw new Error(
+          `d${rawSides} is not supported. Valid: ${[...USER_VALID_SIDES].map((s) => 'd' + s).join(', ')}, d100z`
+        );
+      } else {
+        dice.push({ count, sides: rawSides as DieSides });
+      }
     } else if (/^\d+$/.test(bare)) {
       modifier += (negative ? -1 : 1) * parseInt(bare, 10);
     } else if (bare !== '') {
