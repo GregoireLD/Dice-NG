@@ -397,52 +397,58 @@ export default function App() {
             </div>
           )}
 
-          <div className={`side-panel-wrapper${sidePanelOpen ? ' open' : ''}`}>
-            <button
-              className="side-panel-toggle"
-              onClick={() => setSidePanelOpen(o => !o)}
-              aria-label={sidePanelOpen ? 'Collapse panel' : 'Expand panel'}
-            >
-              <span className="side-panel-toggle-icon">{sidePanelOpen ? '›' : '‹'}</span>
-              <span className="side-panel-toggle-label">Roll History</span>
-            </button>
-            <div className="side-panel">
-              {roomCode && roomCode !== 'SOLO' && (
-                <PlayerList
-                  players={players}
-                  myId={myId}
-                  roomCode={roomCode}
-                  isHost={isHost}
-                  onLeave={handleLeaveRoom}
-                />
-              )}
-              {(!roomCode || roomCode === 'SOLO') && (
-                <div className="solo-back">
-                  <button className="leave-btn" onClick={handleLeaveRoom}>← Lobby</button>
-                  <button
-                    className="stats-test-btn"
-                    onClick={() => setShowStatsModal(true)}
-                    disabled={isRolling}
-                    title="Run statistical fairness test on all die geometries"
-                  >
-                    Stats Test
+          {/* bottom-region: transparent on desktop, unified fixed container on mobile */}
+          <div className="bottom-region">
+            <div className="bottom-bar">
+              <DiceInput onRoll={handleRoll} disabled={isRolling} />
+              <div className="bottom-status-row">
+                {isRolling && <p className="rolling-hint">Rolling {pendingNotation}…</p>}
+                {appState === 'settled' && <p className="settled-hint">Click Roll to go again</p>}
+                {(isRolling || appState === 'settled') && (
+                  <button className="reset-btn" onClick={handleReset} title="Stop roll and reset">
+                    Reset
                   </button>
-                </div>
-              )}
-              <RollHistory records={history} onClear={() => setHistory([])} />
+                )}
+              </div>
             </div>
-          </div>
 
-          <div className="bottom-bar">
-            <DiceInput onRoll={handleRoll} disabled={isRolling} />
-            <div className="bottom-status-row">
-              {isRolling && <p className="rolling-hint">Rolling {pendingNotation}…</p>}
-              {appState === 'settled' && <p className="settled-hint">Click Roll to go again</p>}
-              {(isRolling || appState === 'settled') && (
-                <button className="reset-btn" onClick={handleReset} title="Stop roll and reset">
-                  Reset
-                </button>
-              )}
+            <div className={`side-panel-wrapper${sidePanelOpen ? ' open' : ''}`}>
+              <button
+                className="side-panel-toggle"
+                onClick={() => setSidePanelOpen(o => !o)}
+                aria-label={sidePanelOpen ? 'Collapse panel' : 'Expand panel'}
+              >
+                <span className="side-panel-toggle-icon">{sidePanelOpen ? '›' : '‹'}</span>
+                <span className="side-panel-toggle-label">Roll History</span>
+              </button>
+              {/* side-panel-collapse: grid-row trick for smooth natural-height animation on mobile */}
+              <div className="side-panel-collapse">
+                <div className="side-panel">
+                  {roomCode && roomCode !== 'SOLO' && (
+                    <PlayerList
+                      players={players}
+                      myId={myId}
+                      roomCode={roomCode}
+                      isHost={isHost}
+                      onLeave={handleLeaveRoom}
+                    />
+                  )}
+                  {(!roomCode || roomCode === 'SOLO') && (
+                    <div className="solo-back">
+                      <button className="leave-btn" onClick={handleLeaveRoom}>← Lobby</button>
+                      <button
+                        className="stats-test-btn"
+                        onClick={() => setShowStatsModal(true)}
+                        disabled={isRolling}
+                        title="Run statistical fairness test on all die geometries"
+                      >
+                        Stats Test
+                      </button>
+                    </div>
+                  )}
+                  <RollHistory records={history} onClear={() => setHistory([])} />
+                </div>
+              </div>
             </div>
           </div>
         </>

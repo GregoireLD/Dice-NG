@@ -351,25 +351,49 @@ body {
   pointer-events: none;
 }
 
-/* ── Mobile: bottom drawer ───────────────────────────────────────────────────── */
+/* ── Mobile: unified bottom container ───────────────────────────────────────── */
 @media (max-width: 640px) {
-  .side-panel-wrapper {
+  /*
+   * On mobile, bottom-region becomes a fixed column anchored at the screen
+   * bottom. The bottom-bar (first child) sits above the drawer, and the
+   * side-panel-wrapper (second child) contains the handle + collapsible panel.
+   * The bottom-bar is pushed up automatically as the panel grows — no JS, no
+   * manual translateY shift required.
+   */
+  .bottom-region {
     position: fixed;
     inset: auto 0 0 0;
-    top: auto;
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+  }
+
+  /* bottom-bar: flows in the column, full width, no absolute positioning */
+  .bottom-bar {
+    position: static;
+    left: auto;
+    bottom: auto;
+    width: 100%;
     transform: none;
-    /*
-     * column-reverse: DOM order is [handle, panel] but flex reverses it so
-     * the handle renders LAST = at the very bottom of the container, and
-     * the panel renders ABOVE the handle. Without this, the panel's layout
-     * height pushes the handle far up the screen even when the panel is hidden.
-     */
+    transition: none;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+
+  /*
+   * Drawer wrapper: column-reverse so the toggle handle (first DOM child)
+   * renders at the bottom and the panel (second DOM child) grows upward above it.
+   */
+  .side-panel-wrapper {
+    position: static;
+    transform: none;
     flex-direction: column-reverse;
     align-items: stretch;
     pointer-events: none;
-    z-index: 10; /* must paint above bottom-bar (later in DOM = higher default stack) */
   }
 
+  /* Toggle becomes a horizontal handle bar at the top of the drawer */
   .side-panel-toggle {
     pointer-events: auto;
     width: auto;
@@ -379,13 +403,15 @@ body {
     border-radius: var(--radius) var(--radius) 0 0;
     border: 1px solid var(--border);
     border-bottom: none;
+    border-right: none;
+    border-left: none;
     padding: 0 16px;
     gap: 8px;
   }
 
   .side-panel-toggle-icon {
     display: inline-block;
-    transform: rotate(-90deg); /* ‹ → ∧ and › → ∨ */
+    transform: rotate(-90deg); /* ‹/› become ∧/∨ */
   }
 
   .side-panel-toggle-label {
@@ -395,32 +421,38 @@ body {
   }
 
   /*
-   * Fixed height (not max-height) so the shift applied to bottom-bar always
-   * matches the actual drawer height — max-height would make the panel shorter
-   * than 45vh when history is short, causing the bottom-bar to over-shift.
+   * side-panel-collapse uses the CSS grid-row trick:
+   *   open  → grid-template-rows: 1fr  (natural content height, capped at max-height)
+   *   closed → grid-template-rows: 0fr (collapses to 0 without JS, no empty-space jump)
+   * This gives a smooth animation to exactly the content's height — unlike
+   * max-height transitions which always animate to the maximum even when content
+   * is shorter.
    */
-  .side-panel {
+  .side-panel-collapse {
+    display: grid;
+    grid-template-rows: 1fr;
+    max-height: var(--mobile-drawer-h);
+    overflow: hidden;
+    transition: grid-template-rows 0.32s ease;
     pointer-events: auto;
-    width: 100%;
-    height: var(--mobile-drawer-h);
-    max-height: none;
-    overflow-y: auto;
-    transform: translateY(0); /* open: panel visible just above the handle */
   }
 
-  .side-panel-wrapper:not(.open) .side-panel {
-    transform: translateY(100%); /* closed: slide down behind / below handle */
+  .side-panel-wrapper:not(.open) .side-panel-collapse {
+    grid-template-rows: 0fr;
     pointer-events: none;
   }
 
-  /* Push the dice input bar up by exactly handle-height (closed) or full drawer (open) */
-  .side-panel-wrapper ~ .bottom-bar {
-    transition: transform 0.32s ease;
-    transform: translateX(-50%) translateY(calc(-1 * var(--mobile-handle-h)));
-  }
-
-  .side-panel-wrapper.open ~ .bottom-bar {
-    transform: translateX(-50%) translateY(calc(-1 * (var(--mobile-drawer-h) + var(--mobile-handle-h))));
+  /* Override desktop translate/opacity — grid controls height on mobile */
+  .side-panel,
+  .side-panel-wrapper:not(.open) .side-panel {
+    transform: none;
+    opacity: 1;
+    width: 100%;
+    max-height: none;
+    min-height: 0; /* required for the grid-row trick to work */
+    overflow-y: auto;
+    transition: none;
+    pointer-events: auto;
   }
 }
 
