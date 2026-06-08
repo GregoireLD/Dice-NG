@@ -26,7 +26,7 @@ export function parseNotation(input: string): ParsedNotation {
       const rawSides = parseInt(dieMatch[2], 10);
       const zSuffix = dieMatch[3] === 'z';
 
-      if (count < 1 || count > 100) throw new Error('Dice count must be 1–100');
+      if (count < 1 || count > 50) throw new Error('Dice count must be 1–50');
 
       if (rawSides === 100 && !zSuffix) {
         // d100 → percentile pair: tens die (00-90) + units die (1-10)
@@ -53,6 +53,9 @@ export function parseNotation(input: string): ParsedNotation {
   }
 
   if (dice.length === 0) throw new Error('No dice found in notation');
+
+  const totalPhysical = dice.reduce((sum, d) => sum + d.count, 0);
+  if (totalPhysical > 50) throw new Error('Total dice count must not exceed 50');
 
   return { dice, modifier, raw: input.trim() };
 }
