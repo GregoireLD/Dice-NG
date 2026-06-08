@@ -593,18 +593,33 @@ export class DiceSimulation {
   // ─── Rolling ────────────────────────────────────────────────────────────────
 
   roll(seed: string) {
+    // Recreate rigid bodies to wipe Rapier's cached contact/broadphase state.
+    // Without this, clients that have run different numbers of physics frames
+    // since the last setDice() call (due to network latency) carry divergent
+    // solver warmstarting data into the new roll, causing trajectories to split.
+    this.setDice(this.dice.map(d => d.sides));
+
     const rng = seedrandom(seed);
     this.rollTime = this.simTime;
     this.forceSettled = false;
 
-    // Spread capped so dice never start outside the play area
-    const spread = Math.min(1.0 + this.dice.length * 0.25, 3.0);
+    // Place dice on a centered square lattice so no two start overlapping.
+    // Spacing 1.8 > 2 × max die circumradius (0.76 for D20); spacing scales down
+    // for large counts so the grid always fits within the arena.
+    // A small seeded jitter (±0.1) breaks the rigid grid visually.
+    const cols = Math.ceil(Math.sqrt(this.dice.length));
+    const rows = Math.ceil(this.dice.length / cols);
+    const maxDim = Math.max(cols - 1, rows - 1, 1);
+    const spacing = Math.min(1.8, (PLAY_HALF - 0.4) * 2 / maxDim);
 
     const worldUp = new THREE.Vector3(0, 1, 0);
 
-    for (const die of this.dice) {
-      const x = (rng() - 0.5) * spread * 2;
-      const z = (rng() - 0.5) * spread * 2;
+    for (let i = 0; i < this.dice.length; i++) {
+      const die = this.dice[i];
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = (col - (cols - 1) / 2) * spacing + (rng() - 0.5) * 0.2;
+      const z = (row - (rows - 1) / 2) * spacing + (rng() - 0.5) * 0.2;
       // Keep spawn height low: max y-velocity + gravity means max apex ~3.5 m,
       // well below the wall top at y=8
       die.body.setTranslation({ x, y: 1.5 + rng() * 0.5, z }, true);
