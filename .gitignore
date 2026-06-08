@@ -10,6 +10,7 @@ wstest3.log
 
 # Private / excluded content
 GitExclude/
+apps/web/.env.production
 
 # OS
 .DS_Store
