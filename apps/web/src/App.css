@@ -526,6 +526,7 @@ body {
 
 .history-row-top { display: flex; justify-content: space-between; align-items: baseline; }
 .history-notation { font-size: 0.78rem; font-family: 'Courier New', monospace; color: var(--text-muted); }
+.history-player { color: var(--gold); font-family: inherit; }
 .history-total { font-size: 1.2rem; font-weight: 700; color: var(--gold); }
 
 .history-row-bottom { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 2px; }

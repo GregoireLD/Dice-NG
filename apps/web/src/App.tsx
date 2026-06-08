@@ -62,7 +62,20 @@ export default function App() {
 
   const currentNotationRef = useRef('');
   const currentModifierRef = useRef(0);
+  const currentRollerRef = useRef('');
+  const myNameRef = useRef('');
+
+  // Authoritative result tracking: roller broadcasts final values; remote clients wait for them.
+  const isLocalRollRef = useRef(false);
+  const currentSeedRef = useRef('');
+  const pendingResultRef = useRef<number[] | null>(null);
+  const physicsDoneTransformsRef = useRef<DieTransform[] | null>(null);
+  const resultFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appStateRef = useRef<AppState>('loading');
+
+  useEffect(() => {
+    myNameRef.current = players.find((p) => p.id === myId)?.name ?? '';
+  }, [players, myId]);
 
   function updateAppState(s: AppState) {
     appStateRef.current = s;
@@ -103,9 +116,31 @@ export default function App() {
         scene.updateDice(transforms);
         scene.render();
 
-        if (appStateRef.current === 'rolling' && sim.isAllSettled()) {
-          updateAppState('settled');
-          finalizeRoll(transforms);
+        if (appStateRef.current === 'rolling' && sim.isAllSettled() && !physicsDoneTransformsRef.current) {
+          if (isLocalRollRef.current) {
+            // We rolled — we're authoritative. Finalize and broadcast the result.
+            updateAppState('settled');
+            finalizeRoll(transforms);
+            if (roomRef.current) {
+              roomRef.current.broadcastRollResult(currentSeedRef.current, transforms.map(t => t.value ?? 0));
+            }
+          } else if (pendingResultRef.current) {
+            // ROLL_RESULT already arrived before we settled — use it.
+            updateAppState('settled');
+            finalizeRoll(transforms, pendingResultRef.current);
+            pendingResultRef.current = null;
+          } else {
+            // Physics done but ROLL_RESULT not yet received — hold the '…' display.
+            physicsDoneTransformsRef.current = transforms;
+            resultFallbackTimerRef.current = setTimeout(() => {
+              const t = physicsDoneTransformsRef.current;
+              if (t && appStateRef.current === 'rolling') {
+                physicsDoneTransformsRef.current = null;
+                updateAppState('settled');
+                finalizeRoll(t);
+              }
+            }, 5000);
+          }
         }
 
         localRafId = requestAnimationFrame(loop);
@@ -150,8 +185,23 @@ export default function App() {
       onPlayerLeft: (_id: string) => {
         setPlayers((prev) => prev.filter((p) => p.id !== _id));
       },
-      onRoll: (msg: { notation: string; seed: string }) => {
-        triggerRoll(msg.notation, msg.seed);
+      onRoll: (msg: { notation: string; seed: string; playerName?: string }) => {
+        triggerRoll(msg.notation, msg.seed, msg.playerName ?? '', false);
+      },
+      onRollResult: (seed: string, values: number[]) => {
+        if (seed !== currentSeedRef.current) return;
+        if (resultFallbackTimerRef.current) {
+          clearTimeout(resultFallbackTimerRef.current);
+          resultFallbackTimerRef.current = null;
+        }
+        const transforms = physicsDoneTransformsRef.current;
+        if (transforms) {
+          physicsDoneTransformsRef.current = null;
+          updateAppState('settled');
+          finalizeRoll(transforms, values);
+        } else {
+          pendingResultRef.current = values;
+        }
       },
       onRoomClosed: () => {
         roomRef.current = null;
@@ -273,11 +323,11 @@ export default function App() {
       roomRef.current.broadcastRoll(seed, parsed.raw);
     }
 
-    triggerRoll(parsed.raw, seed);
+    triggerRoll(parsed.raw, seed, myNameRef.current, true);
   }, []);
 
   /** Internal: actually start a roll given notation + seed (called by self and by peers) */
-  function triggerRoll(notation: string, seed: string) {
+  function triggerRoll(notation: string, seed: string, playerName = '', isLocal = false) {
     if (!simRef.current || !sceneRef.current) return;
 
     let parsed;
@@ -287,9 +337,19 @@ export default function App() {
       return;
     }
 
+    if (resultFallbackTimerRef.current) {
+      clearTimeout(resultFallbackTimerRef.current);
+      resultFallbackTimerRef.current = null;
+    }
+    physicsDoneTransformsRef.current = null;
+    pendingResultRef.current = null;
+    isLocalRollRef.current = isLocal;
+    currentSeedRef.current = seed;
+
     const sides = expandDice(parsed);
     currentNotationRef.current = parsed.raw;
     currentModifierRef.current = parsed.modifier;
+    currentRollerRef.current = playerName;
     setPendingNotation(parsed.raw);
 
     simRef.current.setDice(sides);
@@ -307,8 +367,11 @@ export default function App() {
     setPendingNotation('');
   }, []);
 
-  function finalizeRoll(transforms: DieTransform[]) {
-    const raw: DieResult[] = transforms.map((t) => ({ sides: t.sides, value: t.value ?? 0 }));
+  function finalizeRoll(transforms: DieTransform[], overrideValues?: number[]) {
+    const raw: DieResult[] = transforms.map((t, i) => ({
+      sides: t.sides,
+      value: overrideValues ? (overrideValues[i] ?? t.value ?? 0) : (t.value ?? 0),
+    }));
 
     // Collapse percentile pairs (1000=tens 00-90, 1001=units 1-10) into single d100 results.
     // expandDice groups all tens before all units, so pair by index.
@@ -326,6 +389,7 @@ export default function App() {
     const record: RollRecord = {
       id: generateSeed(),
       notation: currentNotationRef.current,
+      playerName: currentRollerRef.current || undefined,
       dice: diceResults,
       modifier: currentModifierRef.current,
       total,
@@ -353,7 +417,6 @@ export default function App() {
 
   const isRolling = appState === 'rolling';
   const latestRecord = history[0];
-  const multiPlayer = players.length > 1 || (roomRef.current !== null);
 
   return (
     <div className="app">
@@ -391,8 +454,8 @@ export default function App() {
                     ` ${latestRecord.modifier > 0 ? '+' : ''}${latestRecord.modifier}`}
                 </span>
               )}
-              {multiPlayer && latestRecord && !isRolling && (
-                <span className="result-roller">{latestRecord.notation}</span>
+              {latestRecord?.playerName && !isRolling && (
+                <span className="result-roller">{latestRecord.playerName}</span>
               )}
             </div>
           )}

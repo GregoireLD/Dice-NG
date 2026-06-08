@@ -554,6 +554,18 @@ export class DiceSimulation {
     );
   }
 
+  // Tear down and rebuild the Rapier world from scratch.  Removing/recreating
+  // bodies is insufficient — Rapier retains internal handle IDs, BVH structure,
+  // and island-graph state that affect contact-processing order and cause
+  // trajectory divergence across clients under many-body simulations.
+  private resetWorld() {
+    this.world.free();
+    this.dice = [];
+    this.world = new RAPIER.World({ x: 0, y: GRAVITY, z: 0 });
+    this.world.timestep = FIXED_STEP;
+    this.buildArena();
+  }
+
   // ─── Die management ─────────────────────────────────────────────────────────
 
   setDice(sides: DieSides[]) {
@@ -593,11 +605,12 @@ export class DiceSimulation {
   // ─── Rolling ────────────────────────────────────────────────────────────────
 
   roll(seed: string) {
-    // Recreate rigid bodies to wipe Rapier's cached contact/broadphase state.
-    // Without this, clients that have run different numbers of physics frames
-    // since the last setDice() call (due to network latency) carry divergent
-    // solver warmstarting data into the new roll, causing trajectories to split.
-    this.setDice(this.dice.map(d => d.sides));
+    // Full world reset: guarantees bit-identical Rapier state on every client
+    // before the seeded physics begins (see resetWorld for why body-only reset
+    // is insufficient).
+    const sides = this.dice.map(d => d.sides);
+    this.resetWorld();
+    this.setDice(sides);
 
     const rng = seedrandom(seed);
     this.rollTime = this.simTime;

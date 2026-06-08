@@ -44,6 +44,7 @@ export interface DieResult {
 export interface RollRecord {
   id: string;
   notation: string;
+  playerName?: string;
   dice: DieResult[];
   modifier: number;
   total: number;

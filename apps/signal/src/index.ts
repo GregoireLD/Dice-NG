@@ -14,6 +14,7 @@ type ClientMsg =
   | { type: 'CREATE_ROOM'; roomCode: string; passwordHash: string; playerName: string }
   | { type: 'JOIN_ROOM'; roomCode: string; passwordHash: string; playerName: string }
   | { type: 'ROLL'; notation: string; seed: string }
+  | { type: 'ROLL_RESULT'; seed: string; values: number[] }
   | { type: 'LEAVE' };
 
 type ServerMsg =
@@ -25,6 +26,7 @@ type ServerMsg =
   | { type: 'PLAYER_JOINED'; id: string; name: string }
   | { type: 'PLAYER_LEFT'; id: string; name: string }
   | { type: 'ROLL'; fromId: string; playerName: string; notation: string; seed: string }
+  | { type: 'ROLL_RESULT'; fromId: string; playerName: string; seed: string; values: number[] }
   | { type: 'ERROR'; reason: string };
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -144,6 +146,16 @@ function handle(id: string, ws: WebSocket, raw: string) {
       const playerName = room.players.get(id) ?? id;
       // Relay to everyone else in the room; sender plays the roll locally
       broadcast(room, { type: 'ROLL', fromId: id, playerName, notation: msg.notation, seed: msg.seed }, id);
+      break;
+    }
+
+    case 'ROLL_RESULT': {
+      const code = playerRoom.get(id);
+      if (!code) break;
+      const room = rooms.get(code);
+      if (!room) break;
+      const playerName = room.players.get(id) ?? id;
+      broadcast(room, { type: 'ROLL_RESULT', fromId: id, playerName, seed: msg.seed, values: msg.values }, id);
       break;
     }
 

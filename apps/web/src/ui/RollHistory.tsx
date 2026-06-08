@@ -25,7 +25,10 @@ export function RollHistory({ records, onClear }: RollHistoryProps) {
         {records.map((r) => (
           <li key={r.id} className="history-item">
             <div className="history-row-top">
-              <span className="history-notation">{r.notation}</span>
+              <span className="history-notation">
+                {r.playerName && <span className="history-player">{r.playerName} · </span>}
+                {r.notation}
+              </span>
               <span className="history-total">{r.total}</span>
             </div>
             <div className="history-row-bottom">

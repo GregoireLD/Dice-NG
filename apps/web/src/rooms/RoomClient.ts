@@ -9,12 +9,14 @@ type ServerMsg =
   | { type: 'PLAYER_JOINED'; id: string; name: string }
   | { type: 'PLAYER_LEFT'; id: string; name: string }
   | { type: 'ROLL'; fromId: string; playerName: string; notation: string; seed: string }
+  | { type: 'ROLL_RESULT'; fromId: string; playerName: string; seed: string; values: number[] }
   | { type: 'ERROR'; reason: string };
 
 type ClientMsg =
   | { type: 'CREATE_ROOM'; roomCode: string; passwordHash: string; playerName: string }
   | { type: 'JOIN_ROOM'; roomCode: string; passwordHash: string; playerName: string }
   | { type: 'ROLL'; notation: string; seed: string }
+  | { type: 'ROLL_RESULT'; seed: string; values: number[] }
   | { type: 'LEAVE' };
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -41,6 +43,7 @@ export interface RoomCallbacks {
   onPlayerJoined?: (player: RoomPlayer) => void;
   onPlayerLeft?: (id: string, name: string) => void;
   onRoll?: (msg: RollMsg) => void;
+  onRollResult?: (seed: string, values: number[]) => void;
   onError?: (reason: string) => void;
   onDisconnected?: () => void;
 }
@@ -112,6 +115,10 @@ export class RoomClient {
     this.wsSend({ type: 'ROLL', notation, seed });
   }
 
+  broadcastRollResult(seed: string, values: number[]) {
+    this.wsSend({ type: 'ROLL_RESULT', seed, values });
+  }
+
   disconnect() {
     this._intentionalClose = true;
     this.wsSend({ type: 'LEAVE' });
@@ -176,6 +183,10 @@ export class RoomClient {
 
       case 'ROLL':
         this.cb.onRoll?.(msg);
+        break;
+
+      case 'ROLL_RESULT':
+        this.cb.onRollResult?.(msg.seed, msg.values);
         break;
 
       case 'ERROR':
