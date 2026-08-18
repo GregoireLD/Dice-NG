@@ -474,11 +474,6 @@ interface SimDie {
   sides: DieSides;
   body: RAPIER.RigidBody;
   config: DieConfig;
-  // For dice whose physics cannot be made provably fair (currently d2/coin),
-  // the uniformly-sampled faceIdx result is stored here and returned directly
-  // from readFaceUp(), bypassing the physics orientation readout.  The visual
-  // animation still runs; only the announced result is RNG-determined.
-  fixedResult?: number;
 }
 
 
@@ -581,13 +576,25 @@ export class DiceSimulation {
           .setTranslation(0, 5, 0)
           .setLinearDamping(0.2)
           .setAngularDamping(highOrder ? 1.2 : 0.4)
+          // Coin is thin and (pre-setMass) very light, so a fast fall can cross its
+          // whole thickness within one fixed step — CCD stops it tunnelling through the floor.
+          .setCcdEnabled(s === 2)
       );
 
       let collider: RAPIER.ColliderDesc;
       if (s === 1) {
         collider = RAPIER.ColliderDesc.ball(0.55);
       } else if (s === 2) {
-        collider = RAPIER.ColliderDesc.cylinder(0.04, 0.55);
+        // Rounded rim (a hole-less torus, in effect) instead of a knife-edge cylinder:
+        // real coins wobble and tip onto a face rather than balancing on a flat rim,
+        // which is what was letting this one settle on its side. Envelope (radius 0.55,
+        // half-height 0.04) is unchanged so it still matches the rendered mesh.
+        collider = RAPIER.ColliderDesc.roundCylinder(0.015, 0.525, 0.025)
+          // Density-derived mass made the coin ~7x lighter than e.g. the D6 cube (much
+          // less volume), so the shared roll() impulse/torque — sized for the other dice —
+          // gave it a wildly disproportionate velocity/spin. Pin its mass to the same
+          // ballpark as the rest so the same impulse produces comparable motion.
+          .setMass(0.5);
       } else if (s === 3 || s === 6) {
         collider = RAPIER.ColliderDesc.cuboid(0.4, 0.4, 0.4);
       } else if (s === 100) {
@@ -659,11 +666,15 @@ export class DiceSimulation {
       const faceIdx = Math.floor(rng() * numFaces) % numFaces;
       const faceDir = die.config.faceDirections[faceIdx];
 
-      // d2 (coin): flat-disk physics cannot be made provably fair — a thin coin
-      // spinning around its symmetry axis has no face-changing effect, so the yaw
-      // layer does nothing for it, and the residual physics bias is persistent.
-      // Lock the result to the uniformly-sampled face index; animation still plays.
-      die.fixedResult = die.sides === 2 ? die.config.faceValues[faceIdx] : undefined;
+      // d2 (coin): whatever bias the physics has toward one face over the other
+      // (e.g. a tendency to settle back on the face it started on) is cancelled out
+      // here, not compensated for after the fact — this FACE INDEX draw already
+      // starts the coin heads-up or tails-up with exactly 50/50 probability from the
+      // seed, and every downstream impulse/torque/tilt draw is independent of that
+      // choice. So P(settle heads) = 0.5*P(same face | started heads) +
+      // 0.5*P(same face | started tails), which is exactly 0.5 regardless of what the
+      // physics itself does — no fixed result needed; readFaceUp() reads the true
+      // settled face like every other die.
 
       const alignDir = die.config.faceCornerData
         ? new THREE.Vector3(-faceDir.x, -faceDir.y, -faceDir.z)
@@ -817,8 +828,6 @@ export class DiceSimulation {
   }
 
   private readFaceUp(d: SimDie): number {
-    if (d.fixedResult !== undefined) return d.fixedResult;
-
     const r = d.body.rotation();
     const q = new THREE.Quaternion(r.x, r.y, r.z, r.w);
     const up = new THREE.Vector3(0, 1, 0);

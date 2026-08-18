@@ -43,7 +43,7 @@ monorepo (npm workspaces)
 5. Once all dice sleep, `readFaceUp()` reads the result:
    - **Face-top dice** (D6, D8, D12, D20): argmax of face-normal dot world-up.
    - **Vertex-top dice** (D4): argmin — the bottom face is flat on the table, and its pre-assigned value equals the opposite (top) vertex.
-   - **D2 (coin)**: result locked at roll time from the seeded RNG; physics animation still plays but is cosmetic.
+   - **D2 (coin)**: same argmax as the other face-top dice, but which face starts face-up is drawn 50/50 from the seed before every throw — this cancels out any physical landing bias the physics has (a "memory" of its start face, or the opposite) without needing to fix the result independently of physics.
 6. Results are pushed to the roll history panel.
 
 ### Multiplayer rooms
